@@ -88,31 +88,37 @@ pipeline {
         stage('Load Images on EC2') {
             steps {
                 echo '📦 Loading Docker images on EC2...'
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
+                sshagent(['ubuntu']) {
+                    sh """
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
-                            cd ${APP_DIR}
-                            
-                            # Load Docker images
-                            echo "Loading backend image..."
-                            docker load -i backend.tar
-                            
-                            echo "Loading frontend image..."
-                            docker load -i frontend.tar
-                            
-                            echo "Loading nginx image..."
-                            docker load -i nginx.tar
-                            
-                            # Cleanup tar files
-                            rm -f *.tar
-                            
-                            # List loaded images
-                            docker images | grep task-
+cd ${APP_DIR}
+
+echo "=== Current directory ==="
+pwd
+
+echo "=== Files in directory ==="
+ls -lh
+
+echo "=== Loading backend image ==="
+docker load -i backend.tar
+
+echo "=== Loading frontend image ==="
+docker load -i frontend.tar
+
+echo "=== Loading nginx image ==="
+docker load -i nginx.tar
+
+echo "=== Cleaning up tar files ==="
+rm -f *.tar
+
+echo "=== Loaded images ==="
+docker images | head -20
 ENDSSH
-                    '''
+                    """
                 }
             }
         }
+          
         
         stage('Deploy to EC2') {
             steps {
