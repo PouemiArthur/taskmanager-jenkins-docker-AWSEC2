@@ -41,84 +41,52 @@ pipeline {
             }
         }
         
-        stage('Save Docker Images') {
+        stage('Transfer Source Files to EC2') {
             steps {
-                echo '💾 Saving Docker images to tar files...'
-                script {
+                echo '📤 Transferring source files to EC2...'
+                sshagent(['ubuntu']) {
                     sh '''
-                        # Save images as tar files
-                        docker save -o backend.tar task-manager-docker_backend:latest || \
-                        docker save -o backend.tar task-backend:latest
-                        
-                        docker save -o frontend.tar task-manager-docker_frontend:latest || \
-                        docker save -o frontend.tar task-frontend:latest
-                        
-                        docker save -o nginx.tar task-manager-docker_nginx:latest || \
-                        docker save -o nginx.tar task-nginx:latest
-                        
-                        ls -lh *.tar
-                    '''
-                }
-            }
-        }
-        
-        stage('Transfer Files to EC2') {
-            steps {
-                echo '📤 Transferring files to EC2...'
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
-                        # Create directory on EC2
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "mkdir -p ${APP_DIR}"
-                        
-                        # Transfer project files
+                
+                        echo "Transferring backend source..."
                         scp -o StrictHostKeyChecking=no -r backend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                
+                        echo "Transferring frontend source..."
                         scp -o StrictHostKeyChecking=no -r frontend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                
+                        echo "Transferring nginx config..."
                         scp -o StrictHostKeyChecking=no -r nginx/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                
+                        echo "Transferring docker-compose.yml..."
                         scp -o StrictHostKeyChecking=no docker-compose.yml ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        scp -o StrictHostKeyChecking=no .env ${EC2_USER}@${EC2_HOST}:${APP_DIR}/ || true
-                        scp -o StrictHostKeyChecking=no deploy.sh ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        
-                        # Transfer Docker images
-                        scp -o StrictHostKeyChecking=no *.tar ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                
+                        echo "Transferring .env..."
+                        scp -o StrictHostKeyChecking=no .env ${EC2_USER}@${EC2_HOST}:${APP_DIR}/ || echo ".env not found"
+                
+                        echo "✅ Source files transferred!"
                     '''
                 }
             }
         }
-        
-        stage('Load Images on EC2') {
-            steps {
-                echo '📦 Loading Docker images on EC2...'
+
+        stage('Build Images on EC2') {
+              steps {
+                echo '🏗️ Building Docker images on EC2...'
                 sshagent(['ubuntu']) {
                     sh """
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
-cd ${APP_DIR}
+        cd ${APP_DIR}
 
-echo "=== Current directory ==="
-pwd
+        echo "=== Building images on EC2 ==="
+        docker-compose build
 
-echo "=== Files in directory ==="
-ls -lh
-
-echo "=== Loading backend image ==="
-docker load -i backend.tar
-
-echo "=== Loading frontend image ==="
-docker load -i frontend.tar
-
-echo "=== Loading nginx image ==="
-docker load -i nginx.tar
-
-echo "=== Cleaning up tar files ==="
-rm -f *.tar
-
-echo "=== Loaded images ==="
-docker images | head -20
-ENDSSH
+        echo "=== Images built ==="
+        docker images | head -10
+        ENDSSH
                     """
                 }
             }
-        }
-          
+        }  
         
         stage('Deploy to EC2') {
             steps {
