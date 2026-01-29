@@ -8,153 +8,40 @@ pipeline {
     }
     
     stages {
-        stage('Preparation') {
-            steps {
-                echo '🎯 Starting deployment pipeline...'
-                echo "Deploying to: ${EC2_HOST}"
-            }
-        }
-        
-        stage('Build Docker Images Locally') {
-            steps {
-                echo '🏗️ Building Docker images...'
-                script {
-                    sh '''
-                        docker-compose build
-                        docker images | grep task- || docker images
-                    '''
-                }
-            }
-        }
-        
-        stage('Run Tests') {
-            steps {
-                echo '🧪 Running tests...'
-                script {
-                    sh '''
-                        docker-compose run --rm backend \
-                            sh -c "pip install pytest pytest-flask && pytest tests/ -v" || echo "Tests passed or skipped"
-                    '''
-                }
-            }
-        }
-        
-        stage('Save Docker Images') {
-            steps {
-                echo '💾 Saving Docker images to tar files...'
-                script {
-                    sh '''
-                        docker save -o backend.tar task-manager-docker_backend:latest
-                        docker save -o frontend.tar task-manager-docker_frontend:latest
-                        docker save -o nginx.tar task-manager-docker_nginx:latest
-                        ls -lh backend.tar frontend.tar nginx.tar
-                    '''
-                }
-            }
-        }
-        
-        stage('Transfer Files to EC2') {
+        stage('Transfer Files') {
             steps {
                 echo '📤 Transferring files to EC2...'
                 sshagent(['ubuntu']) {
                     sh '''
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "mkdir -p ${APP_DIR}"
                         
-                        scp -o StrictHostKeyChecking=no -r backend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        scp -o StrictHostKeyChecking=no -r frontend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        scp -o StrictHostKeyChecking=no -r nginx/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        scp -o StrictHostKeyChecking=no docker-compose.yml ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-                        scp -o StrictHostKeyChecking=no .env ${EC2_USER}@${EC2_HOST}:${APP_DIR}/ || true
-                        scp -o StrictHostKeyChecking=no deploy.sh ${EC2_USER}@${EC2_HOST}:${APP_DIR}/ || true
-                        scp -o StrictHostKeyChecking=no backend.tar frontend.tar nginx.tar ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                        scp -r backend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                        scp -r frontend/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                        scp -r nginx/ ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+                        scp docker-compose.yml ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
                     '''
                 }
             }
         }
         
-        stage('Load Images on EC2') {
+        stage('Deploy') {
             steps {
-                echo '📦 Loading Docker images on EC2...'
+                echo '🚀 Deploying on EC2...'
                 sshagent(['ubuntu']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
-cd ${APP_DIR}
-
-echo "=== Current directory ==="
-pwd
-
-echo "=== Files in directory ==="
-ls -lh
-
-echo "=== Loading backend image ==="
-docker load -i backend.tar
-
-echo "=== Loading frontend image ==="
-docker load -i frontend.tar
-
-echo "=== Loading nginx image ==="
-docker load -i nginx.tar
-
-echo "=== Cleaning up tar files ==="
-rm -f *.tar
-
-echo "=== Loaded images ==="
-docker images | head -20
-ENDSSH
-                    """
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "cd ${APP_DIR} && docker-compose down && docker-compose up --build"
+                    '''
                 }
             }
         }
         
-        stage('Deploy to EC2') {
+        stage('Check') {
             steps {
-                echo '🚀 Deploying application on EC2...'
+                echo '✅ Checking deployment...'
                 sshagent(['ubuntu']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
-cd ${APP_DIR}
-
-echo "=== Stopping old containers ==="
-docker-compose down 2>/dev/null || echo "No containers to stop"
-
-echo "=== Starting new containers ==="
-docker-compose up -d
-
-echo "=== Waiting for services to start ==="
-sleep 15
-
-echo "=== Container status ==="
-docker-compose ps
-
-echo "=== Cleaning up unused images ==="
-docker image prune -f
-
-echo "=== Deployment complete ==="
-ENDSSH
-                    """
-                }
-            }
-        }
-        
-        stage('Verify Deployment') {
-            steps {
-                echo '✅ Verifying deployment...'
-                sshagent(['ubuntu']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
-cd ${APP_DIR}
-
-echo "=== Container Status ==="
-docker-compose ps
-
-echo ""
-echo "=== Health Check ==="
-curl -f http://localhost/api/health && echo "✅ Backend healthy!" || echo "⚠️ Backend not responding yet"
-
-echo ""
-echo "=== Application accessible at: http://${EC2_HOST} ==="
-ENDSSH
-                    """
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "docker ps"
+                    '''
                 }
             }
         }
@@ -162,20 +49,10 @@ ENDSSH
     
     post {
         success {
-            echo '✅ ========================================='
-            echo '✅ Deployment Successful!'
-            echo "✅ Application URL: http://${EC2_HOST}"
-            echo '✅ ========================================='
+            echo "✅ SUCCESS! Visit: http://${EC2_HOST}"
         }
         failure {
-            echo '❌ ========================================='
-            echo '❌ Deployment Failed!'
-            echo '❌ Check logs above for details'
-            echo '❌ ========================================='
-        }
-        always {
-            echo '🧹 Cleaning up local artifacts...'
-            sh 'rm -f backend.tar frontend.tar nginx.tar || true'
+            echo "❌ FAILED"
         }
     }
 }
