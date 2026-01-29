@@ -11,7 +11,7 @@ pipeline {
         stage('Transfer Files') {
             steps {
                 echo '📤 Transferring files to EC2...'
-                sshagent(['ubuntu']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "mkdir -p ${APP_DIR}"
                         
@@ -27,7 +27,7 @@ pipeline {
         stage('Deploy') {
             steps {
                 echo '🚀 Deploying on EC2...'
-                sshagent(['ubuntu']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "cd ${APP_DIR} && docker-compose down && docker-compose up --build"
                     '''
@@ -38,7 +38,7 @@ pipeline {
         stage('Check') {
             steps {
                 echo '✅ Checking deployment...'
-                sshagent(['ubuntu']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "docker ps"
                     '''
